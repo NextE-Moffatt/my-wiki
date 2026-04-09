@@ -1,0 +1,4 @@
+inbox/processed/
+*.log
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
