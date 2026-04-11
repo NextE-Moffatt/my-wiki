@@ -11,6 +11,18 @@ from pathlib import Path
 from datetime import date
 from openai import OpenAI
 
+def extract_pdf_text(pdf_path):
+    """提取 PDF 文字，返回字符串"""
+    try:
+        from pypdf import PdfReader
+        reader = PdfReader(pdf_path)
+        text = "\n".join(page.extract_text() or "" for page in reader.pages)
+        return text.strip()
+    except ImportError:
+        return f"[PDF 解析失败：请运行 pip3 install pypdf]"
+    except Exception as e:
+        return f"[PDF 解析出错：{e}]"
+
 # ── 配置区 ──────────────────────────────────────────────
 # 切换模型只需改这三行
 
@@ -28,7 +40,7 @@ MODEL    = "qwen-plus"
 
 WIKI_DIR   = Path(__file__).parent
 INBOX_DIR  = WIKI_DIR / "inbox"
-PROCESSED  = INBOX_DIR / "processed"
+PROCESSED  = WIKI_DIR / "inbox_processed"
 PAGES_DIR  = WIKI_DIR / "pages"
 SCHEMA     = (WIKI_DIR / "schema.md").read_text()
 INDEX      = (WIKI_DIR / "index.md").read_text()
@@ -42,7 +54,8 @@ def log(msg):
 
 def read_inbox_files():
     PROCESSED.mkdir(parents=True, exist_ok=True)
-    files = [f for f in INBOX_DIR.glob("*.md") if f.is_file()]
+    files = [f for f in INBOX_DIR.iterdir()
+             if f.is_file() and f.suffix.lower() in (".md", ".pdf")]
     return files
 
 def read_existing_pages():
@@ -56,7 +69,11 @@ def read_existing_pages():
 def build_prompt(inbox_files, existing_pages):
     inbox_contents = ""
     for f in inbox_files:
-        inbox_contents += f"\n\n=== {f.name} ===\n{f.read_text()}"
+        if f.suffix.lower() == ".pdf":
+            content = extract_pdf_text(f)
+            inbox_contents += f"\n\n=== {f.name} (PDF) ===\n{content}"
+        else:
+            inbox_contents += f"\n\n=== {f.name} ===\n{f.read_text()}"
 
     pages_summary = "\n".join(f"- {p}" for p in existing_pages.keys())
 

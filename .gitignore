@@ -1,4 +1,5 @@
-inbox/processed/
+inbox_processed/
+inbox/*.pdf
 *.log
 .obsidian/workspace.json
 .obsidian/workspace-mobile.json
