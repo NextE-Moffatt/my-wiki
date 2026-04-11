@@ -171,7 +171,24 @@ def main():
     # 移动已处理文件
     for f in files:
         shutil.move(str(f), str(PROCESSED / f.name))
-    log(f"已移动到 inbox/processed/")
+    log(f"已移动到 inbox_processed/")
+
+    # 自动 git commit，方便回退
+    try:
+        import subprocess
+        file_names = ", ".join(f.name for f in files)
+        subprocess.run(
+            ["git", "-C", str(WIKI_DIR), "add", "-A"],
+            check=True, capture_output=True
+        )
+        subprocess.run(
+            ["git", "-C", str(WIKI_DIR), "commit",
+             "-m", f"ingest: {file_names}"],
+            check=True, capture_output=True
+        )
+        log("已自动 git commit（可用 'git revert HEAD' 回退）")
+    except Exception as e:
+        log(f"git commit 失败（不影响 wiki 内容）：{e}")
 
 if __name__ == "__main__":
     main()
