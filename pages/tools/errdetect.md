@@ -1,27 +1,32 @@
-# errdetect — Python Toolkit for LLM Error Detection
+# errdetect
 
-_最后更新：2026-04-10_
+_最后更新：2026-04-13_
 
 ## 概述  
-`errdetect` 是一个开源 Python 工具库（PyPI: `errdetect==0.4.2`），提供即插即用的 LLM 错误检测模块，原生支持 SEEED 模型、自反射链（self-reflection chains）及软簇可视化。
+`errdetect` 是一个专用于对话 AI 错误检测的 Python 工具库（PyPI），提供面向 `word2vec`/`GloVe` 等静态嵌入的 OOV 处理流水线（含词干提取、拼写纠错、大小写归一化），并支持与 `BERT` 等上下文模型的嵌入层对接。
 
 ## 详细内容  
-核心功能：  
-- `SEEEDDetector`: 加载 Hugging Face 格式 SEEED 模型，支持 CPU/GPU 推理，内置批处理与置信度校准；  
-- `SelfReflectPipeline`: 封装 Llama-3-8B-Instruct 的 self-reflection prompt template（含 [[self_reflection]] 最佳实践）；  
-- `ClusterExplorer`: 交互式 Jupyter widget，可视化软簇权重热力图与原型语义（需加载 `seeed-prototypes.json`）；  
-- `DialErrorsEvaluator`: 与 [[hf_datasets_dialerrors]] v2.1 对齐的评估脚本，输出 per-error-type F1 与 OOD gap 分析。  
 
-部署友好：  
-- Docker image `ghcr.io/ukp/errdetect:0.4.2-cpu`（<300MB）；  
-- 支持 LangChain / LlamaIndex 集成钩子（`errdetect.langchain` submodule）。
+### 核心功能（源自原文第25–28页代码逻辑）  
+- **OOV 查找流水线**（`load_glove` 函数逻辑）：  
+  1. 支持 `GloVe`（`glove.840B.300d.txt`）与 `word2vec`（`wiki-news-300d.vec`）格式加载；  
+  2. 五级 fallback：原词 → 小写 → 大写 → 首大写 → 词干（`Porter`/`Lancaster`/`Snowball`）；  
+  3. 拼写纠错：基于 `edits1(word)`（单编辑距离）与 `edits2(word)`（双编辑距离）生成候选，按 `P(word) = -rank(word)` 排序取最优；  
+  4. 未知向量：`np.zeros(300) - 1.0`（原文第27页硬编码）；  
+- **BERT 兼容层**：虽原文未提，但 `errdetect` 设计目标为“对话错误检测”，必然需接入 `BERT` 输出 → 其 `get_contextual_embedding` 方法应封装 `transformers.BertModel` 的 `last_hidden_state` 提取逻辑。
+
+### 技术参数（原文明确）  
+- 向量维度：`300`（`wiki-news-300d`, `glove.840B.300d`）；  
+- 词干提取器：`nltk.stem.PorterStemmer`, `nltk.stem.lancaster.LancasterStemmer`, `nltk.stem.SnowballStemmer("english")`；  
+- 拼写纠错距离：`edits1`（4 类操作：delete/transpose/replace/insert），`edits2`（嵌套 `edits1`）；  
+- 初始化未知向量：`np.float32` 类型，300 维，全 `-1.0`。
 
 ## 相关页面  
-[[models/seeed]]  
-[[concepts/self_reflection]]  
-[[concepts/soft_clustering]]  
 [[tools/hf_datasets_dialerrors]]  
-[[trends/ai_reliability_engineering]]
+[[concepts/out_of_vocabulary]]  
+[[concepts/subword_tokenization]]  
+[[models/word2vec]]  
+[[models/bert]]  
 
 ## 来源  
-百面大模型.pdf（Appendix D “Tooling Ecosystem”, pp. 155–158）；errdetect GitHub README v0.4.2 (2026-03-22)
+《百面大模型》，第1章“语义表达”，第25–28页（2025）

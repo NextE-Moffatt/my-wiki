@@ -1,9 +1,18 @@
 # Wiki Index
 
-_最后更新：2026-04-10_
+_最后更新：2026-04-13_
+
+## Books
+- [baimian_damoxx](pages/books/baimian_damoxx.md) — 《百面大模型》，国内首部面试题驱动的大模型全栈技术指南（2025）
 
 ## Models
 - [seeed](pages/models/seeed.md) — Soft Clustering Extended Encoder-Based Error Detection, EMNLP 2025
+- [bert](pages/models/bert.md) — Bidirectional Encoder Representations from Transformers, NAACL 2019
+- [gpt](pages/models/gpt.md) — Generative Pre-trained Transformer series, OpenAI 2018–2024
+- [word2vec](pages/models/word2vec.md) — Shallow neural network for static dense word embeddings, Mikolov et al. 2013
+- [fasttext](pages/models/fasttext.md) — Character n-gram enhanced word embeddings for OOV handling, Bojanowski et al. 2017
+- [sbert](pages/models/sbert.md) — Sentence-BERT:孪生BERT微调框架，解决各向异性，STS-B 85.4（Reimers & Gurevych 2019）
+- [simcse](pages/models/simcse.md) — Unsupervised contrastive sentence embedding via Dropout-as-augmentation, EMNLP 2021
 
 ## Concepts
 - [scaling_computation](pages/concepts/scaling_computation.md) — 算力扩展与摩尔定律，AI 核心驱动力
@@ -14,6 +23,26 @@ _最后更新：2026-04-10_
 - [soft_clustering](pages/concepts/soft_clustering.md) — 允许样本概率隶属多簇的无监督聚类方法
 - [self_reflection](pages/concepts/self_reflection.md) — LLM生成对其自身输出的批判性分析
 - [monitoring_and_observability](pages/concepts/monitoring_and_observability.md) — LLM系统可观测性三支柱（metrics/logs/traces）
+- [subword_tokenization](pages/concepts/subword_tokenization.md) — 子词分词原理、WordPiece/BPE/Unigram对比、贪心匹配算法
+- [word_level_tokenization](pages/concepts/word_level_tokenization.md) — 空格分词实现、OOV脆弱性、与子词方案量化对比
+- [position_encoding](pages/concepts/position_encoding.md) — 正弦编码、RoPE、NTK-aware scaling等位置建模技术
+- [causal_lm](pages/concepts/causal_lm.md) — 因果语言建模目标函数与实现细节
+- [mlm](pages/concepts/mlm.md) — 掩码语言建模原理与性能瓶颈分析
+- [one_hot_encoding](pages/concepts/one_hot_encoding.md) — Sparse token representation with zero semantic similarity between distinct tokens
+- [distributional_hypothesis](pages/concepts/distributional_hypothesis.md) — “You shall know a word by the company it keeps”: theoretical foundation of word embeddings
+- [polysemy_problem](pages/concepts/polysemy_problem.md) — The fundamental challenge of word sense disambiguation in static embeddings
+- [contextual_embedding](pages/concepts/contextual_embedding.md) — Dynamic token representations conditioned on full sentence context
+- [semantic_representation](pages/concepts/semantic_representation.md) — Mapping language symbols to computable vector spaces with semantic fidelity
+- [out_of_vocabulary](pages/concepts/out_of_vocabulary.md) — Out-of-vocabulary (OOV) problem and mitigation strategies across embedding paradigms
+- [tokenization](pages/concepts/tokenization.md) — Text-to-symbol mapping as the first semantic gatekeeper in NLP systems
+- [character_ngram](pages/concepts/character_ngram.md) — Character n-gram definition, boundary markers, role in FastText and modern fallbacks
+- [bpe](pages/concepts/bpe.md) — Byte Pair Encoding: frequency-driven greedy subword merging algorithm
+- [wordpiece](pages/concepts/wordpiece.md) — WordPiece: likelihood-driven subword segmentation via EM algorithm
+- [word_mover_distance](pages/concepts/word_mover_distance.md) — Word Mover Distance: EMD-based sentence similarity metric, $ O(p^3 \log p) $
+- [sentence_embedding](pages/concepts/sentence_embedding.md) — Sentence embedding evaluation via alignment & uniformity metrics
+- [alignment_and_uniformity](pages/concepts/alignment_and_uniformity.md) — Formal definitions and optimization of alignment/uniformity for sentence vectors
+- [contrastive_learning](pages/concepts/contrastive_learning.md) — Contrastive learning framework: alignment-uniformity tradeoff, InfoNCE loss, positive/negative construction
+- [dropout_as_augmentation](pages/concepts/dropout_as_augmentation.md) — Using inherent Dropout stochasticity as free semantic-preserving data augmentation
 
 ## Papers
 - [bitter_lesson](pages/papers/bitter_lesson.md) — Rich Sutton, 2019；70 年 AI 史的核心教训
@@ -29,7 +58,10 @@ _最后更新：2026-04-10_
 ## Trends
 - [human_knowledge_vs_computation](pages/trends/human_knowledge_vs_computation.md) — AI 史上反复出现的人类知识 vs 通用计算模式
 - [ai_reliability_engineering](pages/trends/ai_reliability_engineering.md) — 将SRE实践迁移到AI系统的新兴工程学科
+- [nlp_four_stages](pages/trends/nlp_four_stages.md) — NLP四阶段演进模型：词袋→word2vec→BERT→ChatGPT
 
 ## Tools
 - [hf_datasets_dialerrors](pages/tools/hf_datasets_dialerrors.md) — 对话错误标注数据集（Hugging Face）
 - [errdetect](pages/tools/errdetect.md) — 对话AI错误检测Python工具库（PyPI）
+- [flashattention](pages/tools/flashattention.md) — 高效注意力计算内核（CUDA）
+- [pagedattention](pages/tools/pagedattention.md) — LLM推理内存管理优化（vLLM）
