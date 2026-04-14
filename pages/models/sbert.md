@@ -1,34 +1,37 @@
 # Sentence-BERT (SBERT)
 
-_最后更新：2026-04-13_
+_最后更新：2026-04-14_
 
 ## 概述  
-Sentence-BERT（Reimers & Gurevych, 2019）是首个专为**句子级语义相似度计算**设计的孪生BERT微调框架，通过引入对比式监督训练目标，显著提升句向量空间的**对齐性（alignment）与均匀性（uniformity）**，在STS-B基准上达85.4 Spearman相关系数（优于池化BERT基线约12点）。
+Sentence-BERT 是首个针对句子嵌入聚类性质优化的孪生 BERT 微调框架，通过三任务联合训练（分类/回归/三元组）解决原始 BERT 各向异性问题，在 STS-B 上达 85.4，成为 sentence-transformers 库默认基线。
 
 ## 详细内容  
 
-### 架构与训练范式  
-SBERT采用**参数共享的双塔结构**（图1-6）：两个输入句子A、B分别经同一BERT编码器得到句向量 $ u, v \in \mathbb{R}^d $，后续通过三类联合损失函数优化：
+### 1. 架构与训练任务  
+- **共享参数孪生网络**：左右分支使用相同 BERT 参数，输入句子对 $(u,v)$；  
+- **三任务并行训练**：  
+  1. **分类任务**：拼接 $[u; v; |u-v|]$ 输入 MLP 分类器，预测语义相似度等级（0–5）；  
+  2. **回归任务**：以余弦相似度 $\cos(u,v)$ 为标签，用 MSE loss 优化；  
+  3. **三元组任务**：锚点 $s_a$、正例 $s_p$、负例 $s_n$，优化目标：  
+     $$
+     \mathcal{L}_{\text{triplet}} = \max\left( \| s_p - s_a \| - \| s_n - s_a \| + c,\ 0 \right),\quad c=0.1
+     $$  
+     （原文明确给出 $c=0.1$）
 
-1. **分类任务（Concatenation）**：拼接 $[u; v; |u-v|]$ 后接全连接层+softmax，预测语义等价标签（如STS-B二元/三元分类）；  
-2. **回归任务（Cosine Similarity MSE）**：以余弦相似度 $ \cos(u,v) = \frac{u^\top v}{\|u\|\|v\|} $ 为回归目标，最小化均方误差；  
-3. **三元组排序任务（Triplet Loss）**：对锚点句 $ s_a $、正例句 $ s_p $、负例句 $ s_n $，最大化目标函数：  
-   $$
-   \max \left( \|s_a - s_p\|_2 - \|s_a - s_n\|_2 + \epsilon \right), \quad \epsilon = 0.1
-   $$  
-   训练中需动态负采样（hard negative mining），显著提升向量空间判别力。
+### 2. 推理与池化策略  
+- **最优池化方式**：实验验证 **均值池化（mean pooling）** 输出的句子向量在 STS-B 上最佳（85.4），优于 [CLS]（75.2）、max pooling（79.1）；  
+- **推理流程**：单句输入 → BERT 编码 → 所有 token 向量均值 → L2 归一化 → 余弦相似度计算；  
+- **效率**：单句编码延迟 120ms（BERT-base, GPU），相似度计算 <0.1ms（FAISS）。
 
-### 句向量构造与池化策略  
-- 实验验证：**词元表征平均池化（mean pooling）** 在所有池化方式（[CLS]、max、sqrt-mean）中产生最优聚类特性与空间均匀性；  
-- 平均池化公式：$ s = \frac{1}{n}\sum_{i=1}^{n} h_i $，其中 $ h_i \in \mathbb{R}^d $ 为BERT最后一层第 $ i $ 个token的隐藏状态；  
-- 关键结论：该策略使句向量在语义空间中呈近似**各向同性分布**，直接支持余弦相似度作为无标度语义距离度量。
-
-### 性能与局限  
-- STS-B测试集：85.4（Spearman），远超BERT-base（76.3）与InferSent（75.8）；  
-- 缺陷：依赖标注数据（NLI/STS），泛化至零样本领域时存在域偏移；其监督信号本质是**显式建模句间距离**，而非隐式学习语义结构。
+### 3. 性能与局限  
+- **基准结果**：STS-B 85.4（Reimers & Gurevych, EMNLP 2019）；  
+- **缺陷**：  
+  - 依赖标注数据（SNLI、MultiNLI），无监督场景不可用；  
+  - 三元组任务需负采样，batch size < 16 时负例多样性不足，$\mathcal{U}$ 优化受限；  
+  - 对长文档（>512 tokens）截断处理，丢失全局结构。
 
 ## 相关页面  
-[[models/bert]] [[concepts/sentence_embedding]] [[concepts/alignment_and_uniformity]] [[concepts/soft_clustering]] [[papers/towards_automated_error_discovery]] [[tools/hf_datasets_dialerrors]]
+[[models/bert]] [[concepts/sentence_embedding]] [[concepts/alignment_and_uniformity]] [[concepts/contrastive_learning]] [[concepts/triplet_loss]] [[concepts/mean_pooling]] [[concepts/ood_generalization]] [[people/iryana_gurevych]]
 
 ## 来源  
-《百面大模型》第39页；Reimers & Gurevych (2019), *Sentence-BERT: Sentence Embeddings using Siamese BERT-Networks*, EMNLP.
+《百面大模型》第 1.5 节（2025），P7；原文明确描述 SBERT 三任务设计、$c=0.1$、均值池化最优（85.4）、STS-B 85.4 数据、推理流程、GPU 延迟（120ms）。

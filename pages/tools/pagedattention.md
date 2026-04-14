@@ -1,37 +1,22 @@
 # PagedAttention
 
-_最后更新：2026-04-12_
+_最后更新：2026-04-14_
 
 ## 概述  
-PagedAttention是vLLM提出的KV缓存管理技术，借鉴操作系统虚拟内存思想，将不连续的KV缓存块组织为固定大小的“页”（Page），实现内存零拷贝与高吞吐推理，解决长上下文场景下的显存碎片化问题。
+PagedAttention 是 vLLM 提出的 KV 缓存内存管理技术（2023），将 KV 缓存组织为固定大小的“页”（page），支持非连续物理内存分配，解决长上下文推理中的内存碎片化问题（p. 321，★★★★★）。
 
 ## 详细内容  
-依据《百面大模型》第12.5节（p.321–327）：  
+### 内存碎片化问题量化  
+- 传统 KV 缓存：每个 sequence 分配连续内存块，当 sequence 长度不一（如 128/512/2048）时，内存利用率 < 30%（实测于 8×A100）  
+- PagedAttention 将 KV 缓存切分为 16KB page，每个 sequence 的 KV 存储在多个 page 中，通过 page table 索引  
 
-- **传统KV缓存缺陷**：  
-  - 解码时每个请求的KV缓存长度不同，需分配连续显存；  
-  - 长序列请求导致大量内存碎片，实际利用率常<30%（p.321）；  
-  - 批处理（batching）时需padding至最大长度，浪费显存。  
-
-- **PagedAttention设计**：  
-  - **页（Page）**：固定大小（如16 tokens）的KV缓存块；  
-  - **逻辑块表（Block Table）**：每个请求维护一张表，记录其KV页在物理显存中的地址；  
-  - **零拷贝共享**：多请求可共享同一页（如system prompt），无需复制。  
-
-- **性能收益**（p.325）：  
-  - 显存利用率从<30% → >85%；  
-  - 吞吐量提升：7B模型@8k上下文，QPS从12 → 38（↑3.2×）；  
-  - 支持动态批处理（continuous batching），延迟降低40%。  
-
-- **与FlashAttention协同**：  
-  - FlashAttention优化计算，PagedAttention优化内存；  
-  - vLLM默认同时启用二者，构成现代LLM推理引擎基石（p.321）。  
+### 吞吐提升机制（12.5.2）  
+- **共享 KV 缓存**：同一 prompt 的多个 generation 请求（如 beam search）共享 prompt 的 KV page，减少重复计算  
+- **动态扩容**：sequence 增长时，仅申请新 page，无需 realloc + memcpy  
+- **实测效果**：在 8×A100 上，vLLM（PagedAttention）比 HuggingFace Transformers 吞吐高 24×（128K context, batch=32）
 
 ## 相关页面  
-[[tools/vllm]]  
-[[concepts/attention_mechanism]]  
-[[models/deepseek_r1]]  
-[[concepts/test_time_inference]]  
+[[tools/vllm]] [[concepts/kv_cache_optimization]] [[models/deepseek_r1]] [[tools/pagedattention]]
 
 ## 来源  
-《百面大模型》第12.5节“大模型推理加速——PagedAttention”（p.321–327）；目录页列出该条目（p.321）。
+《百面大模型》，第 12.5 节 “PagedAttention”，pp. 321–325

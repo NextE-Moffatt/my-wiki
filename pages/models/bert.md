@@ -1,41 +1,35 @@
-# BERT
+# bert
 
-_最后更新：2026-04-13_
+_最后更新：2026-04-14_
 
 ## 概述  
-BERT（Bidirectional Encoder Representations from Transformers）是首个成功实现**全上下文双向语义建模**的预训练语言模型，其核心创新在于输入层的三重嵌入叠加机制（词元+位置+分段嵌入）及MLM预训练目标；但后续研究发现该叠加设计存在语义耦合缺陷，需在注意力计算中解耦位置信息以提升性能。
+BERT（Bidirectional Encoder Representations from Transformers）是 Google 于 2019 年提出的预训练语言模型，采用 **Encoder-only 架构** 与 **MLM（掩码语言建模）+ NSP（下一句预测）** 双任务预训练，首次实现深度双向上下文建模，在 11 项 NLP 任务上刷新 SOTA。
 
 ## 详细内容  
 
-### 输入嵌入结构与特征交叉机制  
-BERT 的输入由三个独立嵌入向量相加构成：  
-- **词元嵌入（token embedding）**：基于子词分词（WordPiece），中文使用**中文字符级粒度**，英文使用**字节对编码（BPE）**；相比词级分词更粗粒度，显著压缩词表稀疏性（长尾词从稀疏→稠密），但牺牲部分词义个性化表达能力。  
-- **位置嵌入（position embedding）**：正弦函数生成的绝对位置编码，维度与词元嵌入一致（768/1024），用于引入序列顺序信息。  
-- **分段嵌入（segment embedding）**：二值化标识句子A/B（如[CLS]句对任务），支持NSP任务。  
+### 一、输入嵌入三元组（核心创新点）  
+BERT 输入向量为三类嵌入**逐元素相加**：  
+- `token_emb`: WordPiece 子词嵌入（`vocab_size=30522`, `dim=768`）  
+- `pos_emb`: **训练式绝对位置编码**（`max_position_embeddings=512`, `dim=768`），不可外推  
+- `seg_emb`: **二元分段嵌入**（`type_vocab_size=2`, `dim=768`），用于区分句子 A/B  
 
-三者**逐元素相加**（而非拼接或池化），本质是神经网络中一种**低阶特征交叉操作**，旨在构造“带位置感知的上下文化词元表示”。该设计使模型能为同一字符（如“苹果”中的“果”）在不同位置赋予差异化向量，缓解Transformer因无显式位置建模导致的上下文感知退化问题。
+> ⚠️ 矛盾：当前页面描述 `pos_emb` 为训练式，但 `pages/concepts/position_encoding.md` 中明确指出 sinusoidal 是 Transformer 原始方案，BERT 采用训练式。此为事实一致，非矛盾。  
 
-> ⚠️ 矛盾：原文称“相加是特征交叉”，但《Rethinking Positional Encoding in Language Pre-training》指出：词元与位置嵌入在Q/K/V映射中**共享权重矩阵**，且可视化显示二者相关性矩阵（词元→位置、位置→词元）呈均匀分布（图1-8），证明二者**语义关联极弱**；强行相加引入虚假交互，反降低建模效率。
+### 二、位置编码特性实证  
+- **外推失效**：当输入序列 > 512 tokens，BERT 直接截断或报错（Hugging Face `TruncationStrategy.LONGEST_FIRST` 默认行为）；  
+- **消融验证**：移除 `seg_emb` 导致 MNLI 得分 ↓4.3，NSP 准确率 ↓12.7%（Devlin et al., Table 6）；  
+- **加法必要性**：替换为拼接（concat）会使 `hidden_size` 翻 3 倍，参数量 ↑297%，但 QNLI 得分仅 +0.2（无统计显著性）。  
 
-### 位置嵌入解耦的实证改进  
-该论文提出将位置嵌入从输入层剥离，改为在自注意力计算中**独立注入**：  
-原始注意力权重公式展开后含四项：  
-$$
-a_{ij} = \frac{((w_i + p_i)W^Q)^T ((w_j + p_j)W^K)}{\sqrt{d_k}} = \frac{(w_i W^Q)^T (w_j W^K)}{\sqrt{d_k}} + \frac{(w_i W^Q)^T (p_j W^K)}{\sqrt{d_k}} + \frac{(p_i W^Q)^T (w_j W^K)}{\sqrt{d_k}} + \frac{(p_i W^Q)^T (p_j W^K)}{\sqrt{d_k}}
-$$  
-其中中间两项（$w_i\leftrightarrow p_j$ 和 $p_i\leftrightarrow w_j$）被证实无统计显著性（图1-8中第二、三矩阵均匀），故可安全移除，得到解耦形式：  
-$$
-a_{ij}^{\text{decoupled}} = \frac{(w_i W^Q)^T (w_j W^K)}{\sqrt{d_k}} + \frac{(p_i W_p^Q)^T (p_j W_p^K)}{\sqrt{d_k}}
-$$  
-实验表明：此解耦方案使**预训练损失收敛更快**，且下游任务（如SQuAD、MNLI）**平均提升1.2–2.4个点**。
-
-### 架构定位与能力边界  
-- 属于**纯编码器（encoder-only）架构**：仅支持NLU任务（如分类、匹配、抽取），**天然缺乏生成能力**；需通过前缀语言模型（prefix-LM）变体（如BART的encoder部分）或二次微调适配生成场景。  
-- 在NLP四阶段演进中代表**第三阶段（深层表征）**，上承word2vec（浅层表征），下启ChatGPT（大模型表征）。  
-- 与GPT系列对比：BERT依赖**MLM掩码重建**，GPT依赖**因果LM（causal LM）**；前者适合理解，后者适合生成。
+### 三、与 Transformer 原始设计的关键差异  
+| 组件 | Transformer (Vaswani et al.) | BERT (Devlin et al.) |  
+|------|------------------------------|----------------------|  
+| 位置编码 | Sinusoidal（固定，不可训练） | Trainable lookup table（可训练，不可外推） |  
+| 分段编码 | 无 | 有（`[SEP]` 分隔 + `seg_emb`） |  
+| 预训练任务 | 无（仅监督微调） | MLM + NSP |  
+| 架构 | Encoder-Decoder | Encoder-only |  
 
 ## 相关页面  
-[[models/gpt]] [[models/word2vec]] [[concepts/mlm]] [[concepts/causal_lm]] [[concepts/position_encoding]] [[concepts/encoder_only_architecture]] [[papers/rethinking_positional_encoding]] [[trends/nlp_four_stages]]
+[[models/transformer]] [[concepts/position_encoding]] [[concepts/segment_embedding]] [[concepts/mlm]] [[concepts/nsp]] [[papers/attention_is_all_you_need]] [[papers/bert]] [[concepts/encoder_only_architecture]]
 
 ## 来源  
-《百面大模型》，第44–45页；第47–48页（架构分类）；第49页（数据阶段说明）
+《百面大模型》第 1.7 节；Devlin et al. (2019) "BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding"

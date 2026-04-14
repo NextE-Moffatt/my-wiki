@@ -1,25 +1,31 @@
 # Books3
 
-_最后更新：2026-04-13_
+_最后更新：2026-04-14_
 
 ## 概述  
-Books3 是由 Shawn Presser 于2020年发布的大型开源图书语料集，包含196,640本小说与非小说类电子书，以**现代叙事风格与常识密度**著称，是 Llama 系列模型中与 Gutenberg 形成互补的“当代知识”支柱。
+Books3 是由 Shawn Presser 于 2020 年构建的大规模图书语料库，包含 196,640 本小说与非小说类图书，是 Llama 等大模型预训练的关键文本来源；在 Llama 预训练数据中，Books3 与 Gutenberg 合计占比 4%。
 
 ## 详细内容  
-- **构成与来源**：  
-  - 来源：Z-Library 镜像、Library Genesis（LibGen）等影子图书馆的公开镜像；  
-  - 类型分布：小说（58%：科幻、奇幻、言情、推理）、非小说（42%：计算机、心理学、经济学、自我提升）；  
-  - 格式：PDF → `pdfplumber` 提取文本，后经 OCR 校验（对扫描版 PDF 使用 `Tesseract`）；  
-  - 清洗：移除页眉页脚、目录、版权声明、重复章节（MD5 段落哈希去重）。  
-- **规模与特征**：  
-  - 总文本量：**127 GB**（UTF-8），平均书籍长度 642 KB；  
-  - 语言：99.1% 英文，其余为西班牙语（0.5%）、法语（0.3%）；  
-  - 关键优势：高密度常识（"how to debug Python code"）、长程叙事连贯性、对话真实感（vs Gutenberg 的古英语句法）。  
-- **在 Llama-2 中的作用**：与 Gutenberg（经典文学）合并计为 **4%** 预训练数据，其中 Books3 贡献约 2.8%，Gutenberg 贡献 1.2%；消融实验表明移除 Books3 导致模型在 MMLU 子集 `Humanities` 分数下降 3.2%，但在 `Computer Science` 下降达 5.7%（凸显其技术文本价值）。  
-- **伦理争议**：因来源涉及版权灰色地带，Llama-2 技术报告未公开 Books3 具体子集，仅以“Books3/Gutenberg mixture”统称。
+依据《百面大模型》第 2.1 节，Books3 的技术细节如下：
+
+- **构建时间与作者**：2020 年，Shawn Presser；  
+- **规模**：196,640 本书（远超 BookCorpus 的 11,038 本与 BookCorpus2 的 17,868 本）；  
+- **内容构成**：涵盖小说（fiction）与非小说（non-fiction）两大类，题材多样，语言风格现代；  
+- **在 Llama 中的配比**：与 Gutenberg 数据合并统计，共占预训练语料的 **4%**；  
+- **对比 BookCorpus**：  
+  - BookCorpus（2015）：16 类未出版免费书，11,038 本；  
+  - BookCorpus2（扩充版）：17,868 本；  
+  - Books3 规模达 BookCorpus 的 **17.6×**，且更注重版权合规性与文本多样性；  
+- **价值**：提供长程依赖建模所需的连贯叙事结构、丰富词汇与复杂句法，弥补网页语料（Common Crawl）碎片化缺陷。
+
+该数据集与 `datasets/gutenberg` 形成互补：Books3 代表现代文学，Gutenberg 代表西方经典文学（28,752 本，19 世纪前作品为主）。
 
 ## 相关页面  
-[[datasets/gutenberg]] [[models/llama]] [[concepts/commonsense_reasoning]] [[tools/pdfplumber]] [[tools/tesseract]]
+[[datasets/gutenberg]]  
+[[datasets/bookcorpus]]  
+[[datasets/webtext]]  
+[[models/llama]]  
+[[concepts/data_cleaning]]
 
 ## 来源  
-《百面大模型》，第2章，第50页（2025）；Llama-2 Technical Report (Meta, 2023)；Presser, S. "Books3: A Large-Scale Dataset of Modern Books", arXiv:2005.14165 (2020).
+《百面大模型》，第 2.1 节 “大模型训练开源数据集”，2025 年出版；含 Books3 构建者、年份、规模（196,640）、Llama 配比（4%，与 Gutenberg 合计）。

@@ -6,61 +6,75 @@ Wiki Inbox Ingest — 模型无关版本
 
 import os
 import sys
+import time
 import shutil
 from pathlib import Path
 from datetime import date
 from openai import OpenAI
 
+
+def api_call_with_retry(client, model, messages, max_tokens=8000, temperature=0.3, retries=3):
+    """带重试的 API 调用，处理连接超时"""
+    # 用更长超时的临时 client
+    retry_client = OpenAI(
+        api_key=client.api_key,
+        base_url=str(client.base_url),
+        timeout=300,  # 5 分钟超时
+    )
+    for attempt in range(retries):
+        try:
+            response = retry_client.chat.completions.create(
+                model=model,
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            if attempt < retries - 1:
+                wait = 10 * (attempt + 1)
+                print(f"    [重试 {attempt+1}/{retries}] {e}，等待 {wait}s...")
+                time.sleep(wait)
+            else:
+                raise e
+
 def extract_pdf_text(pdf_path, max_pages=50):
-    """将 PDF 转为文本。支持文本 PDF 和扫描 PDF（OCR）。
+    """将 PDF 转为文本。支持文本 PDF 和扫描 PDF。
 
     优先级：
-      1. pymupdf4llm（文本 PDF → Markdown）
-      2. PyMuPDF OCR（扫描 PDF → Tesseract OCR）
-      3. pypdf（兜底）
+      1. pymupdf4llm（文本 PDF → Markdown，表格保留良好）
+      2. pypdf（兜底文本提取）
+    对于扫描 PDF，返回 None，由调用方使用视觉 API 处理。
     """
     pdf_path = Path(pdf_path)
 
-    # ── 方案 1：PyMuPDF（pymupdf4llm + OCR）─────────────
     try:
         import pymupdf
         doc = pymupdf.open(str(pdf_path))
         total = min(len(doc), max_pages)
 
-        # 先检测是否为扫描 PDF（前 5 页无文字）
+        # 检测是否为扫描 PDF（前 5 页无文字）
         sample_text = ""
         for i in range(min(5, len(doc))):
             sample_text += doc[i].get_text().strip()
 
         if len(sample_text) > 100:
-            # 文本 PDF → 用 pymupdf4llm 转 Markdown
+            # 文本 PDF → pymupdf4llm（保留表格结构）
             try:
                 import pymupdf4llm
                 md = pymupdf4llm.to_markdown(str(pdf_path), pages=list(range(total)))
                 if len(md.strip()) > 100:
+                    doc.close()
                     return f"[pymupdf4llm 解析，共 {total}/{len(doc)} 页]\n\n{md}"
             except Exception:
-                # pymupdf4llm 失败，用普通文本提取
                 text = "\n".join(doc[i].get_text() for i in range(total))
                 if text.strip():
+                    doc.close()
                     return f"[PyMuPDF 文本提取，共 {total}/{len(doc)} 页]\n\n{text.strip()}"
         else:
-            # 扫描 PDF → OCR
-            tessdata = "/opt/homebrew/share/tessdata"
-            ocr_pages = []
-            for i in range(total):
-                page = doc[i]
-                try:
-                    tp = page.get_textpage_ocr(
-                        language="chi_sim+eng", dpi=200, tessdata=tessdata
-                    )
-                    page_text = page.get_text(textpage=tp).strip()
-                    if page_text:
-                        ocr_pages.append(f"--- 第 {i+1} 页 ---\n{page_text}")
-                except Exception:
-                    ocr_pages.append(f"--- 第 {i+1} 页 ---\n[OCR 失败]")
-            if ocr_pages:
-                return f"[PyMuPDF OCR 解析，共 {total}/{len(doc)} 页]\n\n" + "\n\n".join(ocr_pages)
+            # 扫描 PDF → 返回 None，标记需要视觉 API 处理
+            doc.close()
+            return None
 
         doc.close()
     except ImportError:
@@ -68,7 +82,7 @@ def extract_pdf_text(pdf_path, max_pages=50):
     except Exception:
         pass
 
-    # ── 方案 2：pypdf fallback ───────────────────────────
+    # pypdf fallback
     try:
         from pypdf import PdfReader
         reader = PdfReader(pdf_path)
@@ -80,7 +94,70 @@ def extract_pdf_text(pdf_path, max_pages=50):
     except Exception:
         pass
 
-    return f"[PDF 解析失败：请安装 pymupdf 或 pypdf]"
+    return None  # 无法提取文本
+
+
+def pdf_to_page_images(pdf_path, start_page=0, end_page=None, dpi=200):
+    """将 PDF 页面渲染为 base64 图片列表（供视觉 API 使用）"""
+    import base64
+    import pymupdf
+    doc = pymupdf.open(str(pdf_path))
+    if end_page is None:
+        end_page = len(doc)
+    end_page = min(end_page, len(doc))
+
+    images = []
+    mat = pymupdf.Matrix(dpi / 72, dpi / 72)
+    for i in range(start_page, end_page):
+        pix = doc[i].get_pixmap(matrix=mat)
+        img_bytes = pix.tobytes("png")
+        b64 = base64.b64encode(img_bytes).decode("utf-8")
+        images.append({"page": i + 1, "base64": b64})
+    doc.close()
+    return images
+
+
+def vision_extract_pages(client, images, batch_label=""):
+    """用视觉模型（Qwen-VL）识别 PDF 页面图片，还原文本和表格为 Markdown"""
+    VISION_MODEL = "qwen-vl-max"  # 通义千问视觉模型
+
+    content = [
+        {"type": "text", "text": (
+            "请精确识别以下 PDF 页面图片中的所有内容，转换为 Markdown 格式。\n"
+            "要求：\n"
+            "1. 表格必须用 Markdown 表格语法还原（| 列1 | 列2 |）\n"
+            "2. 公式用 LaTeX 语法（$...$）\n"
+            "3. 保留标题层级（#, ##, ###）\n"
+            "4. 代码用 ```代码块``` 包裹\n"
+            "5. 图片描述用 [图：描述] 标注\n"
+            "6. 保持原文内容完整，不要遗漏\n"
+            f"以下是 {batch_label} 的页面图片："
+        )}
+    ]
+
+    for img in images:
+        content.append({"type": "text", "text": f"\n--- 第 {img['page']} 页 ---"})
+        content.append({
+            "type": "image_url",
+            "image_url": {"url": f"data:image/png;base64,{img['base64']}"}
+        })
+
+    import time
+    for attempt in range(3):
+        try:
+            response = client.chat.completions.create(
+                model=VISION_MODEL,
+                messages=[{"role": "user", "content": content}],
+                max_tokens=8000,
+                temperature=0.1,
+                timeout=120,
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            if attempt < 2:
+                time.sleep(5 * (attempt + 1))
+            else:
+                raise e
 
 # ── 配置区 ──────────────────────────────────────────────
 # 切换模型只需改这三行
@@ -231,23 +308,16 @@ def write_files(file_map):
         written.append(rel_path)
     return written
 
-def ingest_one_file(client, f, existing_pages):
-    """处理单个文件：小文件一次处理，大文件分段处理"""
-    content = read_file_content(f)
+def ingest_text_chunks(client, content, filename, existing_pages):
+    """处理文本内容：分段深度处理"""
     chunks = split_into_chunks(content)
     total_written = []
 
     if len(chunks) == 1:
-        # 小文件：一次深度处理
-        log(f"  处理 {f.name}（{len(content)} 字，1 段）")
-        prompt = build_prompt_single(content, f.name, existing_pages)
-        response = client.chat.completions.create(
-            model=MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=8000,
-            temperature=0.3,
-        )
-        result = response.choices[0].message.content
+        log(f"  处理 {filename}（{len(content)} 字，1 段）")
+        prompt = build_prompt_single(content, filename, existing_pages)
+        result = api_call_with_retry(client, MODEL,
+            [{"role": "user", "content": prompt}])
         file_map = parse_response(result)
         if file_map:
             written = write_files(file_map)
@@ -256,33 +326,92 @@ def ingest_one_file(client, f, existing_pages):
         else:
             log(f"  → 警告：AI 未输出任何文件")
             with open(WIKI_DIR / "ingest.log", "a") as logf:
-                logf.write(f"\n--- AI 原始输出 ({f.name}) ---\n{result}\n---\n")
+                logf.write(f"\n--- AI 原始输出 ({filename}) ---\n{result}\n---\n")
     else:
-        # 大文件：逐段深度处理
-        log(f"  处理 {f.name}（{len(content)} 字，分 {len(chunks)} 段）")
+        log(f"  处理 {filename}（{len(content)} 字，分 {len(chunks)} 段）")
         for i, chunk in enumerate(chunks, 1):
             log(f"  段 {i}/{len(chunks)}（{len(chunk)} 字）...")
             prompt = build_prompt_single(
-                chunk, f.name, existing_pages, chunk_info=(i, len(chunks))
+                chunk, filename, existing_pages, chunk_info=(i, len(chunks))
             )
-            response = client.chat.completions.create(
-                model=MODEL,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=8000,
-                temperature=0.3,
-            )
-            result = response.choices[0].message.content
+            result = api_call_with_retry(client, MODEL,
+                [{"role": "user", "content": prompt}])
             file_map = parse_response(result)
             if file_map:
                 written = write_files(file_map)
                 total_written.extend(written)
                 log(f"    → 写入 {len(written)} 个文件")
-                # 更新 existing_pages，让下一段能看到前面段生成的页面
                 existing_pages = read_existing_pages()
             else:
                 log(f"    → 警告：段 {i} AI 未输出任何文件")
                 with open(WIKI_DIR / "ingest.log", "a") as logf:
-                    logf.write(f"\n--- AI 原始输出 ({f.name} 段{i}) ---\n{result}\n---\n")
+                    logf.write(f"\n--- AI 原始输出 ({filename} 段{i}) ---\n{result}\n---\n")
+
+    return total_written
+
+
+def ingest_scanned_pdf(client, f, existing_pages, pages_per_batch=4, max_pages=50):
+    """处理扫描 PDF：
+    第 1 步：视觉模型批量 OCR（只转文字，不做分析）→ 省 token
+    第 2 步：合并文本 → 走普通的文本分段 ingest 流程
+    """
+    import pymupdf
+    doc = pymupdf.open(str(f))
+    total = min(len(doc), max_pages)
+    doc.close()
+
+    # ── 第 1 步：视觉 OCR，只转文字 ──
+    num_batches = (total + pages_per_batch - 1) // pages_per_batch
+    log(f"  第1步：视觉OCR（{total}页，{num_batches}批）")
+
+    all_text_parts = []
+    for batch_idx in range(num_batches):
+        start = batch_idx * pages_per_batch
+        end = min(start + pages_per_batch, total)
+        log(f"    OCR 第{start+1}-{end}页...")
+
+        images = pdf_to_page_images(f, start_page=start, end_page=end, dpi=100)
+
+        try:
+            md_text = vision_extract_pages(
+                client, images,
+                batch_label=f"{f.name} 第{start+1}-{end}页"
+            )
+            if md_text and len(md_text.strip()) > 20:
+                all_text_parts.append(md_text.strip())
+                log(f"    → {len(md_text)} 字")
+            else:
+                log(f"    → 内容太少，跳过")
+        except Exception as e:
+            log(f"    → OCR 失败：{e}")
+
+    if not all_text_parts:
+        log(f"  视觉 OCR 未提取到任何文本")
+        return []
+
+    # ── 第 2 步：合并文本，走文本分段 ingest ──
+    full_text = f"[视觉OCR解析，{f.name}，共{total}页]\n\n" + "\n\n".join(all_text_parts)
+    log(f"  第2步：合并文本（{len(full_text)}字），开始分段 ingest")
+    return ingest_text_chunks(client, full_text, f.name, existing_pages)
+
+
+def ingest_one_file(client, f, existing_pages):
+    """处理单个文件：自动选择文本模式或视觉模式"""
+    if f.suffix.lower() == ".pdf":
+        # 先尝试文本提取
+        content = extract_pdf_text(f)
+        if content is not None:
+            # 文本 PDF → 走文本分段流程
+            log(f"  文本 PDF，走文本模式")
+            return ingest_text_chunks(client, content, f.name, existing_pages)
+        else:
+            # 扫描 PDF → 走视觉模式
+            log(f"  扫描 PDF，走视觉模式（Qwen-VL）")
+            return ingest_scanned_pdf(client, f, existing_pages)
+    else:
+        # Markdown 文件
+        content = f.read_text()
+        return ingest_text_chunks(client, content, f.name, existing_pages)
 
     return total_written
 

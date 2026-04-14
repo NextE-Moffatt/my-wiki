@@ -1,25 +1,32 @@
-# One-Hot Encoding
+# one_hot_encoding
 
-_最后更新：2026-04-13_
+_最后更新：2026-04-14_
 
 ## 概述  
-One-hot 编码是一种将离散词元（token）映射为高维稀疏向量的表征方式：词表大小为 $N$ 时，每个词被表示为 $N$ 维向量，其中仅对应词索引位置为 1，其余均为 0。它是词向量建模的起点，但不具备语义可计算性。
+One-hot encoding 是一种将离散词元映射为 $V$ 维稀疏向量的表征方式，其中 $V$ 为词表大小；每个词对应唯一坐标轴上的单位向量，其余维度全为 0。
 
 ## 详细内容  
-- **数学定义**：对词表 $\mathcal{V} = \{w_1, w_2, ..., w_N\}$，词 $w_i$ 的 one-hot 向量为 $\mathbf{e}_i \in \{0,1\}^N$，满足 $(\mathbf{e}_i)_j = \delta_{ij}$（Kronecker delta）。  
-- **几何性质**：任意两个不同词的 one-hot 向量正交，欧氏距离恒为 $\sqrt{2}$，余弦相似度恒为 0（见原文图1-1标注）。  
-- **核心缺陷**：  
-  - ❌ 无法建模语义关系（如近义词、上下位关系）；  
-  - ❌ 无泛化能力（未登录词无法表征）；  
-  - ❌ 维度灾难：当 $N = 10^5$（典型大词表），向量稀疏度达 $99.999\%$，内存与计算效率极低。  
-- **历史定位**：作为早期 NLP 系统（如 n-gram LM、朴素贝叶斯分类器）的输入层基础，后被稠密嵌入全面替代；但在现代 LLM 的 token embedding 层中，仍作为 *输入索引查找表（lookup table）的逻辑接口* 存在——即 `embedding[w_idx]` 实质是隐式 one-hot 查表。
+- **数学定义**：对词表 $\mathcal{V} = \{w_1, w_2, ..., w_V\}$，词 $w_i$ 的 one-hot 向量为 $\mathbf{e}_i \in \{0,1\}^V$，满足 $(\mathbf{e}_i)_j = \delta_{ij}$（Kronecker delta）。  
+- **几何性质**：任意两个 distinct one-hot 向量 $\mathbf{e}_i, \mathbf{e}_j$（$i \neq j$）满足：  
+  - 欧氏距离：$\|\mathbf{e}_i - \mathbf{e}_j\|_2 = \sqrt{2}$（恒定，无区分度）  
+  - 余弦相似度：$\cos(\theta) = \frac{\mathbf{e}_i^\top \mathbf{e}_j}{\|\mathbf{e}_i\| \|\mathbf{e}_j\|} = 0$（完全正交）  
+- **语义建模缺陷**：  
+  - 无法表达近义关系（如 *bicycle* 与 *bike* 相似度为 0）；  
+  - 无法支持类比推理（如 *king − man + woman ≈ queen* 在 one-hot 空间无意义）；  
+  - 向量空间各向同性且无结构，违背分布式语义假设 [[distributional_hypothesis]]。  
+- **工程瓶颈**：  
+  - 维度灾难：现代大模型词表 $V \sim 10^5$–$10^6$，导致 embedding lookup table 占用 GB 级显存（如 $V=32768$, $d=4096$ → $\sim 512$ MB FP16）；  
+  - 稀疏性：99.99%+ 元素为 0，无法利用稠密矩阵计算硬件（GPU/TPU）的算力优势。  
+
+> ⚠️ 矛盾：`pages/concepts/tokenization.md` 中称 “one-hot 是 tokenization 的输出表示”，但严格而言，tokenization 输出的是整数 ID（index），one-hot 是其 *可选的、低效的* 向量化实现；现代框架（PyTorch/HF）默认使用 embedding lookup（非 one-hot + matmul）规避该开销。此矛盾将在 `log.md` 中记录。
 
 ## 相关页面  
-[[concepts/tokenization]]  
-[[concepts/subword_tokenization]]  
-[[models/word2vec]]  
-[[concepts/distributional_hypothesis]]  
-[[concepts/out_of_vocabulary]]
+[[distributional_hypothesis]]  
+[[sparse_vs_dense_embeddings]]  
+[[tokenization]]  
+[[embedding_lookup]]  
+[[out_of_vocabulary]]  
+[[semantic_representation]]
 
 ## 来源  
-《百面大模型》第1章第1.1.1节（p.20）；图1-1原始标注：“欧氏距离均为√2”、“余弦相似度均为0”
+《百面大模型》第 1.1.1 节（2025），图 1-1 及配套文字说明

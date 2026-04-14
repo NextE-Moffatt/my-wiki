@@ -1,28 +1,31 @@
-# Contextual Embedding
+# contextual_embedding
 
-_最后更新：2026-04-13_
+_最后更新：2026-04-14_
 
 ## 概述  
-上下文嵌入（Contextual Embedding）指模型为同一词元生成的向量随其所在句子上下文动态变化的技术范式，本质是将词义消歧（WSD）与语义组合（compositionality）联合建模，是 BERT、GPT 等预训练语言模型区别于 word2vec 的核心特征。
+Contextual embedding 是指词向量随输入上下文动态变化的表示方式，由 BERT 等预训练模型实现，从根本上解决 polysemy_problem，其核心是利用自注意力机制对全句语义进行加权聚合。
 
 ## 详细内容  
-- **定义与必要性**：  
-  - 静态嵌入（如 word2vec）违反人类语言认知：词义天然依赖语境（如 “bank” 在 “river bank” 与 “bank account” 中语义迥异）；  
-  - 上下文嵌入通过函数 $f: (\text{sentence}, \text{position}) \to \mathbb{R}^d$ 实现动态映射，即 $\mathbf{e}_i = f(s, i)$，其中 $s$ 为完整输入序列。  
-- **实现机制**：  
-  - **Transformer 架构**：自注意力层计算 query $Q_i$ 与所有 key $K_j$ 的相似度 $\text{softmax}(Q_i K_j^\top / \sqrt{d_k})$，使 $\mathbf{h}_i^{(l)}$ 聚合对 $i$ 位置语义最相关的上下文 token 信息；  
-  - **层间演化**：底层（1–3层）侧重局部语法（POS、chunking），中层（4–8层）建模语义角色与指代，顶层（9–12层）编码任务特定语义（如问答中的答案跨度）；  
-  - **BERT 特例**：使用 `[CLS]` 向量作为句子级表征，各 token 向量 $\mathbf{h}_i^{(12)}$ 为词级上下文嵌入。  
-- **量化证据**：  
-  - SemEval-2013 WSD 任务中，BERT-base 达 78.2 F1，显著超越 word2vec + SVM（52.1 F1）；  
-  - 消融实验表明：移除自注意力层后，BERT 的 polysemy 分辨能力下降 >40%（领域共识，原文未提供数据但明确归因于自注意力）。
+
+### 与静态嵌入的本质区别  
+| 维度 | 静态嵌入（word2vec） | Contextual Embedding（BERT） |
+|------|----------------------|-------------------------------|
+| **向量生成** | 词形唯一映射：$w \mapsto \mathbf{v}_w$ | 词形+上下文联合映射：$(w, \text{sentence}) \mapsto \mathbf{v}_w^{\text{sent}}$ |
+| **语义建模** | 共现统计（local window） | 全局依赖（self-attention over all tokens） |
+| **多义处理** | ❌ 同一词形恒等向量 | ✅ 同一词形在不同句中向量差异显著（如 *apple* 例） |
+| **下游适配** | 需额外特征工程 | 可直接微调（fine-tuning）或提示（prompting） |
+
+### BERT 的实现机制（书中要点）  
+- **输入表示**：token embedding + segment embedding + position embedding（见 [[position_encoding]]）；  
+- **核心运算**：Multi-Head Self-Attention 层，对每个 token $w_i$ 计算：  
+  $$
+  \text{Attention}(Q,K,V) = \text{softmax}\left(\frac{QK^\top}{\sqrt{d_k}}\right)V, \quad Q=WK^Q, K=WK^K, V=WK^V
+  $$  
+  其中 $W$ 为输入投影，$K^Q,K^K,K^V$ 为可学习权重；  
+- **动态性来源**：每个 token 的输出向量是所有 token 的加权和，权重由 query-key 相似度决定 → 上下文改变则权重分布改变 → 输出向量改变。
 
 ## 相关页面  
-[[models/bert]]  
-[[models/gpt]]  
-[[concepts/attention_mechanism]]  
-[[concepts/polysemy_problem]]  
-[[concepts/semantic_representation]]
+[[bert]] [[polysemy_problem]] [[attention_mechanism]] [[position_encoding]] [[sparse_vs_dense_embeddings]] [[distributional_hypothesis]]
 
 ## 来源  
-《百面大模型》第1章第1.1.3节（p.24）；明确指出 BERT “利用自注意力机制计算输入句子中所有词和目标词之间的相关性，用以指导构建目标词的词向量，使得它所构建的词向量与输入句子的上下文语义相匹配”
+《百面大模型》第 1.1.3 节（p. 11），明确对比 “word2vec 无法解决一词多义” 与 “BERT 利用自注意力机制...使词向量与上下文语义相匹配”，并指出 BERT 向量“随句子不同而改变”。

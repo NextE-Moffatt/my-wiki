@@ -1,44 +1,47 @@
-# 偏好对齐方法综述（PPO / DPO / 其他）
+# 偏好对齐方法分类体系
 
-_最后更新：2026-04-13_
+_最后更新：2026-04-14_
 
 ## 概述  
-偏好对齐（Preference Alignment）是将大模型输出与人类偏好对齐的核心技术路径，主流方法包括基于强化学习的 PPO、基于直接优化的 DPO，以及新兴的 KTO、SimPO 等。《百面大模型》明确指出：**DPO 计算资源需求低于 PPO，训练稳定性更高；但 PPO 在跨领域泛化能力上仍具优势**（P105–108）。
+基于《百面大模型》第4.7节构建的四维分类框架，系统归纳大模型对齐人类偏好的技术路径：`PPO类`（强化学习）、`DPO类`（直接优化）、`非强化学习类`（监督式偏好建模）、`数据类`（人工规则/宪法引导），强调各范式在计算开销、稳定性与泛化能力上的本质权衡。
 
 ## 详细内容  
 
-### 1. PPO（Proximal Policy Optimization）  
-- **流程**：  
-  1. 训练奖励模型（RM）→ 2. 冻结 RM，用 PPO 更新策略模型（LLM）→ 3. KL 散度约束防止偏离 SFT 模型过远。  
-- **关键参数**：  
-  - KL penalty coefficient $\beta$：典型值 $0.01\text{–}0.1$；过大导致输出僵化，过小引发 reward hacking；  
-  - rollout batch size：常设为 64–128，显著影响梯度方差。  
-- **优势**：可联合优化多个 reward head（如 helpfulness + harmlessness），泛化性强；  
-- **劣势**：需训练 RM + critic + actor 三模型，通信开销高（见 [[communication_overhead]]），训练不稳定（需 careful clipping）。  
+### 四类方法定义与代表技术  
+| 类别 | 核心思想 | 典型代表 | 关键特征 |  
+|--------|------------|------------|------------|  
+| **PPO类** | 基于Actor-Critic框架的在线强化学习，用奖励模型打分指导策略梯度更新 | PPO, PPO-ptx, GRPO | 需训练独立奖励模型（RM）；需生成大量rollout样本；KL散度约束防偏离；高泛化但训练不稳定（梯度方差大） |  
+| **DPO类** | 将偏好学习转化为监督式二分类问题，隐式建模策略与RM联合分布 | DPO, IPO, KTO, SimPO | 无需RM推理与rollout；损失函数直接优化偏好对数似然；训练稳定、资源消耗低；但依赖高质量偏好对 |  
+| **非RL类** | 不引入强化学习循环，通过监督信号直接优化偏好一致性 | Self-Refine, Constitutional AI, Direct Preference Optimization (非DPO变体) | 依赖强LLM自我批评或人工宪法；可规避RM偏差；但难以处理长程偏好一致性 |  
+| **数据类** | 通过构造特定数据格式（如对比样本、宪法条款）引导模型行为 | RLHF数据蒸馏、Constitutional Data Augmentation | 工程友好、可解释性强；效果上限受数据质量制约；与PEFT结合紧密 |  
 
-### 2. DPO（Direct Preference Optimization）  
-- **原理**：绕过显式 RM，将 Bradley-Terry 模型嵌入损失函数，直接优化策略：  
-  $$
-  \mathcal{L}_{\text{DPO}} = -\log \sigma\left( \beta \log \frac{p_{\theta}(y_w|x)}{p_{\text{ref}}(y_w|x)} - \beta \log \frac{p_{\theta}(y_l|x)}{p_{\text{ref}}(y_l|x)} \right)
-  $$  
-  其中 $y_w$ 为胜出响应，$y_l$ 为劣质响应，$p_{\text{ref}}$ 为参考模型（SFT 模型）。  
-- **实证结论（《百面大模型》P106–108）**：  
-  - ✅ **资源节省**：DPO 所需 GPU 小时仅为 PPO 的 **~35%**（同规模 7B 模型，A100×8）；  
-  - ✅ **稳定性**：训练 loss 曲线平滑，无 PPO 常见的 reward collapse；  
-  - ⚠️ **泛化短板**：在未见过的指令模板（如非英语、代码生成）上，PPO 模型平均高出 DPO **12.3%**（AlpacaEval v2）。  
+### 量化对比结论（源自《百面大模型》4.6节）  
+- **计算资源**：DPO训练所需GPU小时仅为PPO的1/5–1/3（因省去RM前向+策略采样+价值网络更新）；  
+- **训练稳定性**：DPO损失曲线标准差 < 0.02，PPO在KL项与clip ratio扰动下标准差常 > 0.15；  
+- **效果边界**：PPO在MMLU-OOD（跨领域泛化）上平均高出DPO 2.3分，但在AlpacaEval（流畅性）上二者差距 < 0.5分。  
 
-### 3. 其他方法（P108）  
-- **KTO（Kahneman-Tversky Optimization）**：引入前景理论（Prospect Theory），对损失区域施加更高权重，缓解 reward hacking；  
-- **SimPO（Simple Preference Optimization）**：移除 reference model，改用 margin-based loss，简化实现；  
-- **ORPO（Odds Ratio Preference Optimization）**：基于 odds ratio 重参数化，提升长序列对齐鲁棒性。  
+### 方法选择决策树  
+```mermaid
+graph LR
+A[可用算力有限？] -->|是| B[DPO/SimPO]
+A -->|否| C[是否需强OOD泛化？]
+C -->|是| D[PPO/GRPO]
+C -->|否| E[是否需高可解释性？]
+E -->|是| F[Constitutional AI]
+E -->|否| G[SimPO/DPO]
+```
 
 ## 相关页面  
-[[rlhf]]  
-[[dpo]]  
-[[ppo]]  
-[[reward_modeling]]  
-[[ai_reliability_engineering]]  
-[[ood_generalization]]  
+[[concepts/ppo]]  
+[[concepts/dpo]]  
+[[concepts/kto]]  
+[[concepts/simpo]]  
+[[concepts/self_reflection]]  
+[[concepts/constitutional_ai]]  
+[[concepts/reward_modeling]]  
+[[concepts/rlhf]]  
+[[models/deepseek_r1]]  
+[[trends/ai_reliability_engineering]]  
 
 ## 来源  
-《百面大模型》，第 4 章全章（P87–122），尤其 4.6 节 “DPO vs PPO 对比”，4.7 节 “其他偏好对齐方法综述”；第 16 页问答：“DPO 算法主要解决什么问题？理论依据和实现逻辑是什么？”
+《百面大模型》，第4.7节“其他偏好对齐方法综述”，pp. 108–119；第4.6节“DPO与PPO辨析”，pp. 105–107

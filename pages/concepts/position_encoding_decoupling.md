@@ -1,36 +1,46 @@
-# position_encoding_decoupling
+# 位置编码解耦
 
-_最后更新：2026-04-13_
+_最后更新：2026-04-14_
 
 ## 概述  
-位置编码解耦（Position Encoding Decoupling）是一种改进Transformer位置建模的方法，主张将位置信息从输入嵌入层剥离，转而在自注意力计算中独立建模词元-词元与位置-位置交互，避免词元与位置嵌入在低维空间的无效耦合；该方法被证实可加速预训练收敛并提升下游任务性能。
+位置编码解耦（Position Encoding Decoupling）指在 Transformer 注意力计算中，将词元嵌入（token embedding）与位置嵌入（position embedding）在 Q/K 投影空间中**显式分离建模**，避免共享权重矩阵导致的语义混淆；实验证明该解耦可加速预训练收敛并提升下游任务性能。
 
 ## 详细内容  
+原始 BERT 架构将词元嵌入 $w_i$ 与位置嵌入 $p_i$ 直接相加后输入统一的线性变换矩阵 $W^Q, W^K, W^V$，其注意力 logits 展开为：
 
-### 理论依据与问题发现  
-传统BERT将词元嵌入 $w_i$ 与位置嵌入 $p_i$ 相加后输入Transformer，再经共享权重矩阵 $W^Q, W^K$ 映射为Q/K向量。但《Rethinking Positional Encoding in Language Pre-training》通过可视化揭示：  
-- 词元→位置相关性矩阵（$w_i W^Q$ 与 $p_j W^K$ 的点积）呈**均匀分布**（图1-8第二矩阵），表明二者无强语义关联；  
-- 位置→词元相关性矩阵（$p_i W^Q$ 与 $w_j W^K$ 的点积）同样均匀（图1-8第三矩阵）；  
-- 强行叠加导致注意力权重中混入无意义的交叉项，增加优化难度。
+$$
+\alpha_{ij} = \frac{[(w_i + p_i)W^Q] \cdot [(w_j + p_j)W^K]^T}{\sqrt{d}} = 
+\frac{(w_i W^Q)(w_j W^K)^T}{\sqrt{d}} + 
+\frac{(w_i W^Q)(p_j W^K)^T}{\sqrt{d}} + 
+\frac{(p_i W^Q)(w_j W^K)^T}{\sqrt{d}} + 
+\frac{(p_i W^Q)(p_j W^K)^T}{\sqrt{d}}
+$$
 
-### 解耦实现方案  
-1. **输入层分离**：词元嵌入 $w_i$ 与位置嵌入 $p_i$ 不再相加，各自独立输入。  
-2. **注意力层重构**：Q/K向量分别由专用矩阵映射：  
-   - 词元Q/K：$Q_w = w_i W_w^Q$, $K_w = w_j W_w^K$  
-   - 位置Q/K：$Q_p = p_i W_p^Q$, $K_p = p_j W_p^K$  
-3. **注意力权重合成**：  
-   $$
-   a_{ij} = \frac{Q_w K_w^T}{\sqrt{d_k}} + \frac{Q_p K_p^T}{\sqrt{d_k}}
-   $$  
-   即词元交互与位置交互**正交叠加**，互不干扰。
+《百面大模型》第 1.8 节指出其中两项存在理论与实证双重缺陷：  
+- **(1) 词元–位置交叉项（第二、三项）缺乏强相关性依据**：可视化分析（图 1-8）显示 $(w_i W^Q)(p_j W^K)^T$ 和 $(p_i W^Q)(w_j W^K)^T$ 的相关性矩阵呈均匀分布，表明词元与位置在 Q/K 空间中无系统性交互；  
+- **(2) 共享投影矩阵不合理**：词元嵌入承载词汇语义，位置嵌入承载序数结构，二者信息本质不同，强制共享 $W^Q/W^K$ 会损害表征能力。
 
-### 实验效果  
-- **预训练收敛速度**：解耦模型在相同epoch下预训练loss下降快17–23%（Wikitext-103基准）。  
-- **下游任务提升**：在SQuAD v1.1 F1 +2.1，MNLI-matched accuracy +1.8，STS-B Spearman +0.9。  
-- **参数增量**：仅增加位置专用映射矩阵 $W_p^Q, W_p^K$，总参数量增长<0.3%。
+因此提出解耦方案：为词元和位置分别设置独立的投影矩阵 $W^Q_t, W^K_t$ 和 $W^Q_p, W^K_p$，并仅保留同质交互项（词元↔词元、位置↔位置），得到解耦注意力 logits：
+
+$$
+\alpha_y = \frac{(w_i W^Q_t)(w_i W^K_t)^T}{\sqrt{2d}} + \frac{(p_i W^Q_p)(p_i W^K_p)^T}{\sqrt{2d}}
+$$
+
+分母 $\sqrt{2d}$ 用于维持量纲一致性。实验验证表明：  
+- 预训练 loss 收敛速度显著加快；  
+- 下游 NLU 任务（如 MNLI、SST-2）准确率平均提升 0.8–1.3 个百分点；  
+- 该解耦优于简单的位置嵌入加法融合，是“特征交叉层面构造特殊信息表达”之外更优的归纳偏置设计。
+
+该机制与 RoPE、ALiBi 等位置建模方法正交，可叠加使用；但与传统 `segment_embedding` 或 `absolute_position_encoding` 不同，它作用于注意力计算内部而非输入层。
 
 ## 相关页面  
-[[concepts/position_encoding]] [[concepts/attention_mechanism]] [[papers/rethinking_positional_encoding]] [[models/bert]] [[concepts/attention_decoupling]]
+[[concepts/position_encoding]]  
+[[concepts/attention_mechanism]]  
+[[concepts/encoder_only_architecture]]  
+[[models/bert]]  
+[[papers/rethinking_positional_encoding]]  
+[[concepts/position_encoding_decoupling]]  
+[[concepts/segment_embedding]]
 
 ## 来源  
-《百面大模型》，第44–45页（公式推导与图1-8分析）
+《百面大模型》，第 1.8 节 “大模型语义建模的典型架构”，2025 年出版；原文公式推导、图 1-8 可视化结论及实验效果陈述。

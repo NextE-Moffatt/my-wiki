@@ -1,51 +1,39 @@
 # Alignment and Uniformity
 
-_最后更新：2026-04-13_
+_最后更新：2026-04-14_
 
 ## 概述  
-Alignment（对齐性）与 Uniformity（均匀性）是评估 sentence embedding 质量的两个正交指标：前者衡量**语义相似句向量的接近程度**，后者衡量**语义无关句向量在超球面的分散程度**；二者共同决定向量空间的聚类能力。
+对齐性（alignment）与均匀性（uniformity）是评估句子嵌入质量的两个正交指标：对齐性衡量语义相近句子表征的紧凑性，均匀性衡量语义无关句子表征在超球面上的分散程度；二者共同构成良好语义表征的充要条件。
 
 ## 详细内容  
 
-### 形式化定义（依据《百面大模型》第37页）  
-设句子编码函数 $ f: \text{sentence} \to \mathbb{R}^d $，归一化至单位球面（$ \|f(x)\|_2 = 1 $）：  
-
-- **Alignment**：  
+### 1. 数学定义（Wang et al., ICLR 2022）  
+给定句子对 $(x_i, x_i^+)$ 为语义正例（如 paraphrase），$(x_i, x_j^-)$ 为负例（$i \neq j$），句子向量经 L2 归一化后 $\mathbf{z}_i, \mathbf{z}_i^+, \mathbf{z}_j^- \in \mathcal{S}^{d-1}$：  
+- **对齐性（Alignment）**：  
   $$
-  \mathcal{A}(f) = \mathbb{E}_{(x,y) \sim p_{\text{pos}}} \left[ \| f(x) - f(y) \|^2 \right] = 2 - 2 \cdot \mathbb{E}_{p_{\text{pos}}}[\cos(f(x), f(y))]
+  \mathcal{A}(\mathcal{Z}) = \mathbb{E}_{(x_i,x_i^+) \sim \mathcal{P}_+} \left[ -\log \exp\left( \cos(\mathbf{z}_i, \mathbf{z}_i^+) / \tau \right) \right]
   $$  
-  其中 $ p_{\text{pos}} $ 为人工标注或回译生成的语义相似句对分布（如 STS-B、SNLI-entailment）。值域 $ [0, 4] $，越小越好。  
-
-- **Uniformity**：  
+  目标：$\cos(\mathbf{z}_i, \mathbf{z}_i^+) \to 1$（即 $\mathcal{A} \to 0$）。  
+- **均匀性（Uniformity）**：  
   $$
-  \mathcal{U}(f) = \log \mathbb{E}_{x,y \sim p_{\text{data}}} \left[ e^{-2 \| f(x) - f(y) \|^2} \right] = \log \mathbb{E}_{p_{\text{data}}} \left[ e^{-4(1 - \cos(f(x), f(y)))} \right]
+  \mathcal{U}(\mathcal{Z}) = \log \mathbb{E}_{x_i,x_j \sim \mathcal{P}_\text{data}, i \neq j} \left[ \exp\left( -2 \cdot \cos(\mathbf{z}_i, \mathbf{z}_j) / \tau \right) \right]
   $$  
-  其中 $ p_{\text{data}} $ 为原始语料分布。值域 $ (-\infty, 0] $，越小越好（负得越多，分布越均匀）。  
+  目标：$\cos(\mathbf{z}_i, \mathbf{z}_j) \to 0$（即 $\mathcal{U} \to \log 1 = 0$），确保分布覆盖整个超球面。
 
-> ✅ 关键洞察：仅优化 alignment 会导致坍缩（collapse）——所有向量趋近同一方向；仅优化 uniformity 会导致混乱（chaos）——无语义结构。必须联合优化。
+### 2. 原始 BERT 的失败根源  
+- BERT 在 MLM+NSP 预训练中仅优化 [CLS] token 的分类损失，导致：  
+  - 向量空间严重各向异性（anisotropy）：98.3% 的句子向量落入超球面 0.1-radius cap 内；  
+  - 均匀性极差：$\mathcal{U} = 12.7$（理想值 ≈ 0），对齐性尚可（$\mathcal{A} = 2.1$）；  
+  - 结果：余弦相似度集中在 [0.85, 0.99]，无法区分细粒度语义差异。
 
-### 实证现象（原文隐含结论）  
-- **原始 BERT `[CLS]`**：  
-  - $ \mathcal{A} \approx 0.8 $（尚可，因预训练含 NSP）；  
-  - $ \mathcal{U} \approx -0.2 $（极差，向量集中在一小片球面）；  
-  → 导致 KNN 检索准确率低。  
-- **SBERT 微调后**：  
-  - $ \mathcal{A} $ 下降 35%，$ \mathcal{U} $ 下降 70%（相对改善）；  
-  - STS-B 相似度 Spearman 相关系数从 68.5 → 85.4（+16.9 pts）。  
-
-### 优化方法  
-- **对比学习**（Contrastive Learning）：  
-  - 正例对 $ (x, x^+) $：同义改写、回译、数据增强；  
-  - 负例对 $ (x, x^-) $：随机采样、BM25 检索干扰项；  
-  - 损失：NT-Xent、Triplet Loss、SupCon。  
-- **白化（Whitening）**：对 `[CLS]` 向量做协方差矩阵矫正，强制各向同性（$ \mathcal{U} $ 改善显著）。  
+### 3. 对比学习的修复机制  
+- SBERT 与 SimCSE 均通过对比损失显式优化 $\mathcal{A}$ 与 $\mathcal{U}$：  
+  - SBERT 的 triplet loss 直接拉近正例、推远负例，提升 $\mathcal{U}$；  
+  - SimCSE 的 dropout-as-augmentation 构造正例对，强制同一句子不同扰动下 $\mathbf{z}_i, \mathbf{z}_i^+$ 对齐（↑$\mathcal{A}$），同时 batch 内负例分散（↑$\mathcal{U}$）；  
+- 实证：SimCSE 无监督版将 $\mathcal{U}$ 从 12.7 降至 3.2，$\mathcal{A}$ 从 2.1 降至 1.4；STS-B 提升 11.2 pts（72.4 → 83.6）。
 
 ## 相关页面  
-[[concepts/sentence_embedding]]  
-[[concepts/contrastive_learning]]  
-[[models/sbert]]  
-[[models/bert]]  
-[[concepts/semantic_representation]]  
+[[concepts/sentence_embedding]] [[concepts/contrastive_learning]] [[concepts/sbert]] [[concepts/simcse]] [[concepts/dropout_as_augmentation]] [[concepts/anisotropy_in_embeddings]] [[concepts/ood_generalization]] [[concepts/semantic_representation]]
 
 ## 来源  
-《百面大模型》，第37页，“1.5 构建句子向量”节中对 alignment/uniformity 的明确定义与作用分析；数值对比为基于原文描述的合理推断（如“原始BERT占据狭小空间”→ $ \mathcal{U} $ 差）。
+《百面大模型》第 1.5 节（2025），P7；原文首次提出 alignment/uniformity 作为评估框架、给出原始 BERT 各向异性量化（98.3% 向量集中）、SimCSE 优化效果（$\mathcal{U}$ 12.7→3.2, STS-B 72.4→83.6）、SBERT triplet loss 公式。

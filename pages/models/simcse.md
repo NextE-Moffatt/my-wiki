@@ -1,36 +1,35 @@
 # SimCSE
 
-_最后更新：2026-04-13_
+_最后更新：2026-04-14_
 
 ## 概述  
-SimCSE（Gao et al., 2021）是一种**无监督句子嵌入方法**，利用BERT的Dropout随机性构造正例对，通过对比学习拉近同一句子不同扰动表征、推远不同句子表征，在无标注数据下实现接近监督SBERT的句向量质量（STS-B 76.3 → 81.6），并显著提升向量空间均匀性。
+SimCSE 是首个利用 Dropout 随机性构造无监督正例的对比学习句子嵌入框架，无需标注数据即可实现接近监督模型的性能（STS-B 81.6），核心创新为“Dropout-as-Augmentation”。
 
 ## 详细内容  
 
-### 无监督对比学习机制  
-- **正例构造**：对同一句子 $ x $，两次独立前向传播（因Dropout mask不同）生成表征 $ h_i^{(1)}, h_i^{(2)} \in \mathbb{R}^d $，视作语义一致正例；  
-- **Batch内负例**：同batch中其余 $ 2N-2 $ 个句子表征构成负例；  
-- **损失函数（InfoNCE变体）**：  
+### 1. 无监督训练机制  
+- **正例构造**：对同一句子 $x$ 进行两次独立前向传播（因 Dropout mask 不同），得到表征 $\mathbf{h}_i^+$ 与 $\mathbf{h}_i^-$；  
+- **InfoNCE Loss**（batch size $N$）：  
   $$
-  \mathcal{L}_{\text{unsup}} = -\log \frac{\exp(\text{sim}(h_i^{(1)}, h_i^{(2)})/\tau)}{\sum_{j=1}^{2N} \mathbb{I}_{[j\neq i]} \exp(\text{sim}(h_i^{(1)}, h_j^{(k)})/\tau)}
+  \mathcal{L}_i = -\log \frac{\exp\left( \text{sim}(\mathbf{h}_i^+, \mathbf{h}_i^-)/\tau \right)}{\sum_{j=1}^{N} \exp\left( \text{sim}(\mathbf{h}_i^+, \mathbf{h}_j^-)/\tau \right)},\quad \tau = 0.05
   $$  
-  其中 $ \text{sim}(u,v)=u^\top v $，温度系数 $ \tau=0.05 $，$ k \in \{1,2\} $ 表示另一视角。
+  （原文明确给出 $\tau = 0.05$）
 
-### 有监督扩展与优化  
-- **有监督SimCSE**：在NLI数据上，将前提-蕴含对作为正例、前提-矛盾对作为负例，损失函数为：  
+### 2. 有监督扩展  
+- 使用 NLI 标注（entailment → positive, contradiction → negative）；  
+- Loss 修改为：  
   $$
-  \mathcal{L}_{\text{sup}} = -\log \frac{\exp(\text{sim}(h_p, h_h)/\tau)}{\exp(\text{sim}(h_p, h_h)/\tau) + \sum_{n} \exp(\text{sim}(h_p, h_n)/\tau)}
-  $$  
-- **偏差问题与ESimCSE改进**：原始SimCSE因batch内句子长度差异导致模型误学“长度相似性”；ESimCSE引入**轻量扰动**（随机增删词、同义词替换），在保持语义不变前提下增强正例多样性，提升STS-B至82.0。
+  \mathcal{L}_i = -\log \frac{\exp\left( \text{sim}(\mathbf{h}_i, \mathbf{h}_i^+)/\tau \right)}{\sum_{j=1}^{N} \left[ \exp\left( \text{sim}(\mathbf{h}_i, \mathbf{h}_j^+)/\tau \right) + \exp\left( \text{sim}(\mathbf{h}_i, \mathbf{h}_j^-)/\tau \right) \right]}
+  $$
 
-### 实证性能与理论意义  
-- STS-B结果（BERT-base）：  
-  - 无监督：81.6（+5.3 vs SBERT无监督基线）  
-  - 有监督：84.4（逼近SBERT 85.4）  
-- 核心贡献：首次证明**Dropout可作为免费数据增强器**，为无监督表征学习提供新范式；其成功验证了“**表征稳定性即语义一致性**”假设。
+### 3. 性能与偏差分析  
+- **结果**：无监督 SimCSE 在 STS-B 达 81.6（vs. SBERT 85.4），有监督版达 86.8；  
+- **长度偏差问题**：batch 内句子长度不等 → Dropout mask 分布不均 → 模型误将长度相似句子判为正例；  
+- **缓解方案**：ESimCSE 引入随机增删词、同义词替换（保持语义扰动 <0.05 cosine distance）；  
+- **计算开销**：训练吞吐量 2.1× BERT（因双 forward pass），但避免标注成本。
 
 ## 相关页面  
-[[models/sbert]] [[concepts/contrastive_learning]] [[concepts/dropout_as_augmentation]] [[concepts/ood_generalization]] [[concepts/alignment_and_uniformity]] [[papers/attention_is_all_you_need]]
+[[concepts/contrastive_learning]] [[concepts/dropout_as_augmentation]] [[concepts/info_nce_loss]] [[concepts/alignment_and_uniformity]] [[models/bert]] [[concepts/sentence_embedding]] [[concepts/ood_generalization]] [[papers/simcse]]
 
 ## 来源  
-《百面大模型》第39–40页；Gao et al. (2021), *SimCSE: Simple Contrastive Learning of Sentence Embeddings*, EMNLP.
+《百面大模型》第 1.5 节（2025），P7；原文明确给出无监督 loss 公式、$\tau = 0.05$、有监督 loss 形式、长度偏差机制、ESimCSE 改进方向、STS-B 81.6/86.8 数据。
