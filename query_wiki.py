@@ -183,6 +183,99 @@ def stage2_prompt(question, stage1_answer, chunk_results):
 """
 
 
+def save_qa_to_wiki(client, question, full_answer):
+    """将问答沉淀为 wiki 页面"""
+    from datetime import date as dt_date
+    import subprocess
+
+    # 读取现有页面列表
+    existing = []
+    for md in PAGES_DIR.rglob("*.md"):
+        existing.append(str(md.relative_to(WIKI_DIR)))
+
+    pages_summary = "\n".join(f"- {p}" for p in sorted(existing))
+
+    prompt = f"""你是一个 wiki 管理助手。请将以下问答内容提炼为 wiki 页面。
+
+## 现有页面列表
+{pages_summary}
+
+## 问答记录
+
+**问题**：{question}
+
+**回答**：
+{full_answer}
+
+## 你的任务
+
+请将这次问答中的知识提炼为 wiki 页面：
+
+1. 提取回答中有价值的知识点，生成 1-3 个 wiki 页面
+2. 不要原样照搬问答，而是**提炼为结构化知识**
+3. 如果回答中的知识已经在现有页面中存在，更新现有页面（补充新信息）
+4. 页面之间用 [[wikilink]] 互相链接
+5. 更新 index.md
+
+格式：
+<<<FILE: pages/分类/文件名.md>>>
+（内容）
+<<<END>>>
+
+也输出更新后的 index.md：
+<<<FILE: index.md>>>
+（内容）
+<<<END>>>
+
+今天日期：{dt_date.today()}
+"""
+
+    print("\n⏳ 正在提炼为 wiki 页面...")
+
+    response = client.chat.completions.create(
+        model=MODEL,
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=6000,
+        temperature=0.3,
+    )
+
+    result = response.choices[0].message.content
+
+    # 解析并写入文件
+    import re
+    pattern = r'<<<FILE:\s*(.+?)>>>\n(.*?)<<<END>>>'
+    matches = re.findall(pattern, result, re.DOTALL)
+    file_map = {path.strip(): content.strip() for path, content in matches}
+
+    if not file_map:
+        print("❌ 未能生成 wiki 页面")
+        return
+
+    written = []
+    for rel_path, content in file_map.items():
+        full_path = WIKI_DIR / rel_path
+        full_path.parent.mkdir(parents=True, exist_ok=True)
+        full_path.write_text(content)
+        written.append(rel_path)
+
+    print(f"✅ 已沉淀 {len(written)} 个页面：")
+    for w in written:
+        print(f"   📄 {w}")
+
+    # git commit
+    try:
+        subprocess.run(["git", "-C", str(WIKI_DIR), "add", "-A"],
+                       check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(WIKI_DIR), "commit",
+                        "-m", f"qa: {question[:50]}"],
+                       check=True, capture_output=True)
+        print("   📌 已 git commit")
+    except Exception:
+        pass
+
+    print("\n💡 提示：运行 wiki-index 更新检索索引，下次提问即可检索到新知识")
+
+
 def main():
     if len(sys.argv) < 2:
         print("用法：python3 query_wiki.py \"你的问题\"")
@@ -235,7 +328,6 @@ def main():
 
     # 清理标记后输出
     clean_answer = stage1_answer.replace("[COMPLETE]", "").replace("[NEED_DETAIL]", "").strip()
-    # 提取 NEED_DETAIL 后面的说明
     detail_hint = ""
     if needs_detail:
         parts = stage1_answer.split("[NEED_DETAIL]")
@@ -243,6 +335,10 @@ def main():
             detail_hint = parts[1].strip()
 
     print(clean_answer)
+
+    # 收集完整回答
+    full_answer = clean_answer
+    stage2_answer = ""
 
     # ── 阶段 2：按需检索原始文档 ──
     has_chunks = chunks_index and len(chunks_index) > 0
@@ -253,13 +349,8 @@ def main():
         if detail_hint:
             print(f"   需要：{detail_hint}")
 
-        # 用问题 + 缺失信息描述做联合检索
         search_query = question + " " + detail_hint if detail_hint else question
-        if q_embedding is None:
-            q_embedding = embed_query(client, search_query)
-        else:
-            q_embedding = embed_query(client, search_query)
-
+        q_embedding = embed_query(client, search_query)
         chunk_results = vector_search(q_embedding, chunks_index, MAX_CHUNKS)
 
         print(f"\n📄 原始文档命中 {len(chunk_results)} 个片段：")
@@ -275,19 +366,23 @@ def main():
             messages=[{"role": "user", "content": prompt2}],
             max_tokens=3000,
             temperature=0.2,
-            stream=True,
         )
-
-        for chunk in response2:
-            if chunk.choices[0].delta.content:
-                print(chunk.choices[0].delta.content, end="", flush=True)
-        print("\n")
+        stage2_answer = response2.choices[0].message.content
+        print(stage2_answer)
+        full_answer += "\n\n---\n\n" + stage2_answer
 
     elif needs_detail and not has_chunks:
         print(f"\n\n💡 Wiki 中缺少部分细节，但原始文档索引为空。")
         print(f"   运行 python3 build_index.py 可构建原始文档索引。")
-    else:
-        print("\n")
+
+    # ── 阶段 3：是否沉淀到 wiki ──
+    print(f"\n{'─' * 50}")
+    try:
+        save = input("💾 沉淀到 wiki？(y/n) ").strip().lower()
+        if save in ("y", "yes", "是"):
+            save_qa_to_wiki(client, question, full_answer)
+    except (EOFError, KeyboardInterrupt):
+        print()
 
 
 if __name__ == "__main__":
