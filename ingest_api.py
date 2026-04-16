@@ -389,31 +389,39 @@ def ingest_scanned_pdf(client, f, existing_pages, pages_per_batch=4, max_pages=5
         log(f"  视觉 OCR 未提取到任何文本")
         return []
 
-    # ── 第 2 步：合并文本，走文本分段 ingest ──
+    # ── 第 2 步：合并文本，保存原始文本，走文本分段 ingest ──
     full_text = f"[视觉OCR解析，{f.name}，共{total}页]\n\n" + "\n\n".join(all_text_parts)
     log(f"  第2步：合并文本（{len(full_text)}字），开始分段 ingest")
+    save_raw_text(f.name, full_text)
     return ingest_text_chunks(client, full_text, f.name, existing_pages)
 
 
+def save_raw_text(filename, content):
+    """保存原始提取文本到 index/raw/，供检索索引使用"""
+    raw_dir = WIKI_DIR / "index" / "raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    raw_path = raw_dir / f"{Path(filename).stem}.md"
+    raw_path.write_text(content)
+    log(f"  已保存原始文本到 index/raw/{raw_path.name}（{len(content)} 字）")
+
+
 def ingest_one_file(client, f, existing_pages):
-    """处理单个文件：自动选择文本模式或视觉模式"""
+    """处理单个文件：自动选择文本模式或视觉模式，同时保存原始文本"""
     if f.suffix.lower() == ".pdf":
-        # 先尝试文本提取
         content = extract_pdf_text(f)
         if content is not None:
-            # 文本 PDF → 走文本分段流程
             log(f"  文本 PDF，走文本模式")
+            save_raw_text(f.name, content)
             return ingest_text_chunks(client, content, f.name, existing_pages)
         else:
-            # 扫描 PDF → 走视觉模式
             log(f"  扫描 PDF，走视觉模式（Qwen-VL）")
+            # 视觉模式中 OCR 的文本会在 ingest_scanned_pdf 里合并
+            # 这里先触发处理，原始文本在里面保存
             return ingest_scanned_pdf(client, f, existing_pages)
     else:
-        # Markdown 文件
         content = f.read_text()
+        save_raw_text(f.name, content)
         return ingest_text_chunks(client, content, f.name, existing_pages)
-
-    return total_written
 
 def main():
     files = read_inbox_files()
